@@ -22,7 +22,7 @@ function render() {
     <div class="roadmap-head">
       <div>
         <h2 style="margin:0">Degree roadmap</h2>
-        <div class="muted small">${esc(p.intendedMajor ? `${p.major} → ${p.intendedMajor}` : p.major)} · ${esc(p.standing)} · ${p.gradTerm ? `graduating ${esc(p.gradTerm)}` : 'standard timeline'}${p.career ? ` · goal: ${esc(p.career)}` : ''}</div>
+        <div class="muted small">${esc(p.intendedMajor ? `${p.major} → ${p.intendedMajor}` : p.major)} · ${esc(p.standing)} · ${p.gradTerm ? `graduating ${esc(p.gradTerm)}` : 'standard timeline'}${p.career ? ` · goals: ${esc(p.career)}` : ''}${p.audit ? ' · audit imported' : ''}</div>
       </div>
       <span class="spacer"></span>
       <button class="btn primary" id="build">${last ? '↻ Rebuild roadmap' : 'Build my roadmap'}</button>
@@ -75,6 +75,20 @@ function renderPlan(r) {
       <p class="small muted">Transfer (ICT) admission has GPA and course requirements set by the department. Check the department's ICT page and meet with an advisor.</p>
     </div>` : ''}
 
+    ${r.audit ? `
+    <div class="panel" style="margin-bottom:14px">
+      <h3>From your degree audit <span class="tag ok">DARS imported</span>${r.audit.earnedHours ? ` <span class="muted small">${r.audit.earnedHours} hours earned</span>` : ''}</h3>
+      ${r.audit.requirements.length ? `<table>
+        <thead><tr><th>Requirement</th><th>Status</th><th>Still needs</th><th>Planned in this roadmap</th></tr></thead>
+        <tbody>${r.audit.requirements.map((q) => `<tr>
+          <td><b>${esc(q.title)}</b></td>
+          <td>${q.status === 'in-progress' ? '<span class="tag info">in progress</span>' : '<span class="tag warn">not met</span>'}</td>
+          <td class="small">${esc(q.needs || '—')}${q.options?.length ? `<div class="muted">from: ${q.options.slice(0, 10).map(esc).join(', ')}${q.options.length > 10 ? '…' : ''}</div>` : ''}</td>
+          <td class="small">${q.kind === 'elective' ? 'Used to pick your electives' : q.planned?.length ? q.planned.map((c) => `<a href="#" data-course="${esc(c)}">${esc(c)}</a>`).join(', ') : q.status === 'in-progress' ? 'Finishing this term' : '<span class="muted">Covered by catalog plan / gen ed slots</span>'}</td>
+        </tr>`).join('')}</tbody></table>` : '<p class="muted">Your audit shows no unmet requirements. 🎉</p>'}
+      <p class="muted small">Courses from the audit (including ones in progress) are treated as completed when planning.</p>
+    </div>` : `<div class="banner info small" style="margin-bottom:14px">Tip: import your DARS degree audit in your profile so the roadmap uses exactly what you still need.</div>`}
+
     <div class="row" style="margin-bottom:10px">
       <div class="legend"><span><i style="background:var(--navy-2)"></i>Required</span><span><i style="background:var(--orange)"></i>Major elective</span><span><i style="background:#8a5cd1"></i>Gen Ed</span><span><i style="background:var(--muted)"></i>Free elective</span></div>
       <span class="spacer"></span>
@@ -87,6 +101,7 @@ function renderPlan(r) {
           ${t.courses.map((c) => `
             <div class="course-pill ${c.kind}" ${c.code ? `data-course="${esc(c.code)}"` : ''} title="${esc(c.prereqText ? 'Prereq: ' + c.prereqText : c.title)}">
               <b>${esc(c.code || '')}</b> ${c.code ? esc(c.suggestion || c.title || '') : `<span>${esc(c.title)}</span>`}
+              ${c.group?.startsWith('Audit:') ? '<div class="why"><span class="tag ok">from audit</span></div>' : ''}
               ${c.options ? `<div class="why">or ${c.options.filter((o) => o !== c.code).slice(0, 4).map(esc).join(', ')}</div>` : ''}
               ${c.code && c.kind !== 'required' ? `<div class="why">for: ${esc(c.title)}${c.why ? ` — ${esc(c.why)}` : ''}${c.by === 'grok' ? ' ✨' : ''}</div>` : ''}
             </div>`).join('') || '<div class="muted small">Light term: room for electives, research or internships.</div>'}

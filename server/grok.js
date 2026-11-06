@@ -191,7 +191,11 @@ async function runTool(name, args, profile, actions) {
       total: result.total, errors: result.errors, diagnostics: result.diagnostics,
       top: result.schedules.slice(0, 3).map((s) => ({
         rank: s.rank, score: s.score, highlights: s.highlights, warnings: s.warnings,
-        sections: s.bundles.map((b) => `${b.courseCode} ${b.label} (CRNs ${b.crns.join(', ')})`),
+        daysWithClass: [...new Set(s.bundles.flatMap((b) => b.sections.flatMap((x) => x.meetings.flatMap((m) => m.days))))].join(''),
+        sections: s.bundles.flatMap((b) => b.sections.map((x) => ({
+          course: b.courseCode, section: x.number, type: x.type, crn: x.crn, seats: x.availability,
+          meets: x.meetings.map((m) => (m.start == null ? 'online/arranged' : `${m.days.join('')} ${m.startLabel}-${m.endLabel} @ ${m.building}`)).join('; '),
+        }))),
       })),
     };
   }
@@ -205,6 +209,7 @@ Student profile: ${JSON.stringify({ standing: profile.standing, major: profile.m
 Rules:
 - ALWAYS use tools for facts about courses, sections, seats, prerequisites and schedules. Never invent CRNs, times or seat counts.
 - When the student wants a schedule, call generate_schedules; the app will render the ranked calendars, so just summarize the best option and why.
+- Copy meeting days/times, CRNs and seat status EXACTLY from tool results. Never compute or guess them. Day letters: M T W R(Thursday) F.
 - Point out restrictions, missing prerequisites and closed sections. Suggest watching closed sections for seat alerts.
 - Remind students to confirm degree requirements with their advisor / DARS when giving degree advice.
 - Keep answers short, use bullet points, and use course codes like "CS 225".`;

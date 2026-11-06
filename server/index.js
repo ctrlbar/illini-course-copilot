@@ -12,6 +12,7 @@ import { buildRoadmap } from './roadmap.js';
 import { grokEnabled, agentReply, parseScheduleRequest } from './grok.js';
 import * as alerts from './alerts.js';
 import { scheduleToIcs, reminderToIcs } from './ics.js';
+import { parseAudit, pdfToText } from './audit.js';
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -69,6 +70,13 @@ app.post('/api/schedules', route(async (req) => {
   }
   const result = await generateSchedules(request);
   return { request, ...result };
+}));
+
+// Degree audit import: PDF upload (application/pdf body) or { text } JSON. Nothing is stored server-side.
+app.post('/api/audit', express.raw({ type: 'application/pdf', limit: '15mb' }), route(async (req) => {
+  const text = req.is('application/pdf') ? await pdfToText(req.body) : String(req.body?.text || '');
+  if (text.trim().length < 50) throw new Error('That audit looks empty. Upload the DARS PDF or paste the full audit text.');
+  return parseAudit(text);
 }));
 
 app.post('/api/roadmap', route((req) => buildRoadmap(req.body.profile || {})));

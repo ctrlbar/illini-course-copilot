@@ -11,6 +11,7 @@ import { parsePrereqs } from './eligibility.js';
 import { genEdCourses, genEdCount, courseGpa } from './datasets.js';
 import { mapLimit } from './http.js';
 import { grokEnabled, askJson } from './grok.js';
+import { neededCount } from './audit.js';
 
 const STANDING_BASE = { freshman: 1, sophomore: 3, junior: 5, senior: 7 };
 
@@ -60,7 +61,9 @@ function careerKeywords(career = '') {
 
 export async function buildRoadmap(profile = {}) {
   const warnings = [];
-  const completed = new Set((profile.completed || []).map(normalizeCode).filter(Boolean));
+  const audit = profile.audit || null;
+  // Courses in progress this term count as done by the time the next term starts.
+  const completed = new Set([...(profile.completed || []), ...(audit?.completed || []), ...(audit?.inProgress || [])].map(normalizeCode).filter(Boolean));
   const standing = (profile.standing || 'sophomore').toLowerCase();
   const transferring = Boolean(profile.intendedMajor && profile.intendedMajor !== profile.major);
   const target = await findProgram(transferring ? profile.intendedMajor : profile.major);
@@ -110,6 +113,30 @@ export async function buildRoadmap(profile = {}) {
     });
   }
   for (let i = pools.length - 1; i >= 0; i--) if (pools[i].consumed) pools.splice(i, 1);
+
+  // ---- degree audit: what DARS says is still unmet overrides guesses from the catalog ----
+  const auditView = [];
+  if (audit?.requirements?.length) {
+    for (const req of audit.requirements) {
+      if (req.status !== 'incomplete') { auditView.push({ ...req, need: 0, planned: [] }); continue; }
+      const need = neededCount(req);
+      const options = (req.options || []).filter((o) => !completed.has(o));
+      if (/elective/i.test(req.title) && options.length) {
+        // elective lists from the audit get priority when filling elective slots
+        pools.unshift({ heading: req.title, group: 'Degree audit', hours: req.needs, fromAudit: true,
+          options: options.map((code) => ({ code, title: pools.flatMap((p) => p.options).find((o) => o.code === code)?.title || code, gpa: courseGpa(code)?.avg ?? null, done: false })) });
+        auditView.push({ ...req, need, planned: [], kind: 'elective' });
+        continue;
+      }
+      const alreadyPlanned = required.filter((r) => !r.done && r.options.some((o) => options.includes(o))).map((r) => r.code);
+      const extra = options
+        .filter((o) => !required.some((r) => r.options.includes(o)))
+        .sort((a, b) => (planIdx.get(a) ?? levelIdx(a)) - (planIdx.get(b) ?? levelIdx(b)))
+        .slice(0, Math.max(0, need - alreadyPlanned.length));
+      for (const code of extra) required.push({ options: [code], titles: [code], hours: null, group: `Audit: ${req.title}`, done: false, code, fromAudit: true });
+      auditView.push({ ...req, need, planned: [...alreadyPlanned, ...extra], kind: 'required' });
+    }
+  }
 
   const remaining = required.filter((r) => !r.done);
   for (const r of remaining) r.ideal = planIdx.get(r.code) ?? levelIdx(r.code);
@@ -231,6 +258,7 @@ export async function buildRoadmap(profile = {}) {
     },
     pools: pools.map((p) => ({ heading: p.heading, hours: p.hours, count: p.options.length, options: p.options.slice(0, 80) })),
     recommendedSequence: program.sequence,
+    audit: audit ? { requirements: auditView, earnedHours: audit.earnedHours ?? null, importedAt: audit.importedAt || null } : null,
     warnings,
     advice: [],
     ai: false,
@@ -273,6 +301,7 @@ async function enhanceWithGrok(result, profile, program) {
     electivePools: result.pools.map((p) => ({ heading: p.heading, options: p.options.map((o) => `${o.code} ${o.title}${o.gpa ? ` (GPA ${o.gpa})` : ''}`) })),
     draftPlan: result.terms.map((t) => ({ term: t.name, courses: t.courses.map((c) => c.code || c.title) })),
     transferNotes: result.transfer ? program.transferText.slice(0, 3000) : undefined,
+    degreeAuditUnmet: result.audit?.requirements.filter((r) => r.status === 'incomplete').map((r) => ({ title: r.title, needs: r.needs, options: r.options })),
   };
   const out = await askJson(
     `You are a UIUC academic planning assistant. Given a student's degree data (from the official catalog), return ONLY JSON:
@@ -289,7 +318,8 @@ Only pick elective codes that appear in the provided pools. electivePicks.slotIn
   for (const p of out.electivePicks || []) {
     const slot = slotRefs[p.slotIndex];
     const code = normalizeCode(p.code);
-    if (slot && code && allowed.has(code)) {
+    const inPlan = result.terms.some((t) => t.courses.some((c) => c !== slot && c.code === code));
+    if (slot && code && allowed.has(code) && !inPlan) {
       const opt = result.pools.flatMap((x) => x.options).find((o) => o.code === code);
       Object.assign(slot, { code, suggestion: opt?.title, why: p.why, by: 'grok' });
     }

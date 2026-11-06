@@ -216,7 +216,7 @@ td { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top
 .suggest { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 
 /* ---------- dialog / toasts ---------- */
-.dialog { border: 0; border-radius: 16px; padding: 0; width: min(620px, 94vw); box-shadow: 0 20px 60px rgba(0,0,0,.3); background: var(--panel); color: var(--text); }
+.dialog { max-height: 92vh; overflow: auto; border: 0; border-radius: 16px; padding: 0; width: min(620px, 94vw); box-shadow: 0 20px 60px rgba(0,0,0,.3); background: var(--panel); color: var(--text); }
 .dialog::backdrop { background: rgba(10, 20, 40, .45); }
 .profile-form { padding: 24px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
@@ -236,3 +236,10 @@ td { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top
   .grid2, .compare { grid-template-columns: 1fr; }
   .topbar { gap: 8px; }
 }
+
+.chip.selected { background: var(--orange); border-color: var(--orange); color: #fff; }
+.career-pick .chip { user-select: none; }
+.audit-box { border: 1px dashed var(--line); border-radius: 10px; padding: 10px 12px 12px; margin: 4px 0 12px; }
+.audit-box legend { font-weight: 600; font-size: 13px; padding: 0 4px; }
+.audit-box input[type=file] { flex: 1; min-width: 0; font-size: 12px; }
+.audit-box textarea { margin-top: 6px; }

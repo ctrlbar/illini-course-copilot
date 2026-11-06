@@ -63,10 +63,25 @@
         <input name="intendedMajor" list="programs" placeholder="e.g. Statistics & Computer Science, BSLAS" autocomplete="off" />
       </label>
       <datalist id="programs"></datalist>
-      <label>Career goal
-        <input name="career" placeholder="e.g. machine learning engineer, quant, product manager, med school" />
-      </label>
-      <div class="chips" id="career-chips"></div>
+      <label>Career goals <span class="muted">(pick any that interest you)</span></label>
+      <div class="chips career-pick" id="career-chips"></div>
+      <label><input name="careerOther" placeholder="Something else? e.g. robotics, sports analytics, patent law" /></label>
+
+      <fieldset class="audit-box">
+        <legend>Degree audit (DARS) <span class="muted">optional, most accurate</span></legend>
+        <p class="muted small">Run your audit in Student Self-Service → Degree Audit, then upload the PDF or paste its text.
+          We read which courses you've taken and which requirements are still unmet. Your UIN, name and email are removed before parsing, and nothing is saved on the server.</p>
+        <div class="row">
+          <input type="file" id="audit-file" accept="application/pdf,.pdf" />
+          <button type="button" class="btn sm" id="audit-paste-toggle">or paste text</button>
+        </div>
+        <textarea id="audit-text" class="hidden" rows="5" placeholder="Paste the full degree audit text here"></textarea>
+        <div class="row" style="margin-top:6px">
+          <button type="button" class="btn sm primary" id="audit-import">Import audit</button>
+          <button type="button" class="btn sm ghost hidden" id="audit-clear">Remove audit</button>
+          <span id="audit-status" class="small"></span>
+        </div>
+      </fieldset>
       <label>Courses completed or in progress <span class="muted">(include AP credit)</span>
         <div class="chip-input" id="completed-input"></div>
       </label>

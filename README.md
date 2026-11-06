@@ -17,6 +17,8 @@ A Grok-powered course-planning assistant for UIUC students. It turns the tedious
 | **Seat alerts** | Watch a closed section; get notified when it opens (browser notification, Discord webhook, or email). Keeps a history of how often each section opens. |
 | **Backup plans** | For each schedule: "if AYC fills, switch to AYD (same time)" or the next-best swap. |
 | **Degree roadmap** | Semester-by-semester plan to graduation from the official catalog requirements and recommended sequence, respecting prerequisite chains and what's offered next term. Electives matched to your career goal. Supports **planning to transfer majors**. |
+| **Degree audit import** | Upload your DARS audit PDF (or paste its text). The app reads the courses you've taken and in progress plus every unmet requirement ("NEEDS: 2 COURSES, SELECT FROM: …"), and the roadmap plans exactly what you still need. UIN, name and email are stripped before parsing; nothing is stored server-side. |
+| **Multiple career goals** | Pick any mix of career interests (e.g. ML + quant finance); electives and Grok's advice are tailored to all of them. |
 | **Gen Ed optimizer** | Finds gen eds that fit your schedule, favoring high-GPA courses that count for two categories at once. |
 | **GPA insights** | Grade distributions by course and instructor. |
 | **Exports** | One-click copy of CRNs for registration, `.ics` calendar export, registration time-ticket reminders. |
@@ -44,7 +46,8 @@ server/
   scheduler.js          constraint search (DFS) + weighted ranking + backup plans
   eligibility.js        prerequisite and restriction parsing
   catalog.js            degree requirements + recommended sequence from catalog.illinois.edu
-  roadmap.js            semester planner (prereq-aware) + Grok elective picks
+  roadmap.js            semester planner (prereq-aware, audit-aware) + Grok elective picks
+  audit.js              DARS degree-audit parsing (PDF/text, rules + Grok) with PII redaction
   grok.js               xAI Grok client, tool-calling agent, NL schedule parser (+ rule-based fallback)
   alerts.js             seat-alert poller, SSE/Discord/email notifications, reminders
   search.js, datasets.js, buildings.js, ics.js

@@ -50,6 +50,12 @@ function openProfile() {
     if (!el.name || !(el.name in p)) continue;
     if (el.type === 'checkbox') el.checked = Boolean(p[el.name]); else el.value = p[el.name];
   }
+  selectedCareers = new Set(p.careers || (p.career ? [p.career] : []));
+  renderCareers();
+  form.elements.careerOther.value = '';
+  pendingAudit = null;
+  showAuditSummary(p.audit);
+  document.getElementById('audit-file').value = '';
   document.getElementById('transferring').checked = Boolean(p.intendedMajor);
   document.getElementById('intended-wrap').classList.toggle('hidden', !p.intendedMajor);
   completed.set(p.completed || []);
@@ -66,10 +72,56 @@ function profileSummary() {
 document.getElementById('profile-btn').addEventListener('click', openProfile);
 document.getElementById('profile-cancel').addEventListener('click', () => dialog.close());
 document.getElementById('transferring').addEventListener('change', (e) => document.getElementById('intended-wrap').classList.toggle('hidden', !e.target.checked));
-document.getElementById('career-chips').innerHTML = ['Software engineer', 'Machine learning / AI', 'Data science', 'Quant finance', 'Cybersecurity', 'Product manager', 'Pre-med', 'Research / PhD', 'Consulting']
-  .map((c) => `<span class="chip click">${c}</span>`).join('');
+// ---------- careers (multi-select) ----------
+const CAREERS = ['Software engineer', 'Machine learning / AI', 'Data science', 'Quant finance', 'Cybersecurity', 'Product manager',
+  'Game development', 'Hardware / embedded', 'Research / PhD', 'Pre-med / health', 'Consulting', 'Business / startups', 'Law / policy', 'Teaching'];
+let selectedCareers = new Set();
+function renderCareers() {
+  const extra = [...selectedCareers].filter((c) => !CAREERS.includes(c));
+  document.getElementById('career-chips').innerHTML = [...CAREERS, ...extra]
+    .map((c) => `<span class="chip click ${selectedCareers.has(c) ? 'selected' : ''}" role="checkbox" aria-checked="${selectedCareers.has(c)}" tabindex="0">${esc(c)}</span>`).join('');
+}
 document.getElementById('career-chips').addEventListener('click', (e) => {
-  if (e.target.classList.contains('chip')) form.elements.career.value = e.target.textContent;
+  const chip = e.target.closest('.chip');
+  if (!chip) return;
+  const c = chip.textContent;
+  if (selectedCareers.has(c)) selectedCareers.delete(c); else selectedCareers.add(c);
+  renderCareers();
+});
+document.getElementById('career-chips').addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); e.target.click(); } });
+
+// ---------- degree audit import ----------
+let pendingAudit = null;
+const auditStatus = (html) => { document.getElementById('audit-status').innerHTML = html; };
+function showAuditSummary(a) {
+  if (!a) { auditStatus(''); document.getElementById('audit-clear').classList.add('hidden'); return; }
+  const unmet = a.requirements.filter((r) => r.status === 'incomplete').length;
+  auditStatus(`<span class="tag ok">✓ Audit loaded</span> ${a.completed.length} completed · ${a.inProgress.length} in progress · ${unmet} unmet requirement${unmet === 1 ? '' : 's'}${a.importedAt ? ` <span class="muted">(${new Date(a.importedAt).toLocaleDateString()})</span>` : ''}`);
+  document.getElementById('audit-clear').classList.remove('hidden');
+}
+document.getElementById('audit-paste-toggle').addEventListener('click', () => document.getElementById('audit-text').classList.toggle('hidden'));
+document.getElementById('audit-clear').addEventListener('click', () => { pendingAudit = { cleared: true }; showAuditSummary(null); });
+document.getElementById('audit-import').addEventListener('click', async () => {
+  const file = document.getElementById('audit-file').files[0];
+  const text = document.getElementById('audit-text').value.trim();
+  if (!file && !text) { auditStatus('<span class="tag bad">Choose a PDF or paste the audit text first</span>'); return; }
+  auditStatus(`<span class="spinner"></span> Reading your audit${store.meta?.grok ? ' with Grok' : ''}…`);
+  try {
+    const res = file
+      ? await fetch('/api/audit', { method: 'POST', headers: { 'Content-Type': 'application/pdf' }, body: file })
+      : await fetch('/api/audit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+    const a = await res.json();
+    if (!res.ok) throw new Error(a.error || 'Import failed');
+    pendingAudit = {
+      importedAt: new Date().toISOString(), source: a.source, program: a.program || null, earnedHours: a.earnedHours ?? null,
+      completed: a.completed, inProgress: a.inProgress, requirements: a.requirements,
+    };
+    // merge audit courses into the completed list so prerequisite checks use them everywhere
+    completed.set([...new Set([...completed.get(), ...a.completed, ...a.inProgress])].sort());
+    showAuditSummary(pendingAudit);
+    if (a.warnings?.length) auditStatus(document.getElementById('audit-status').innerHTML + `<br><span class="tag warn">${esc(a.warnings[0])}</span>`);
+    document.getElementById('audit-text').value = '';
+  } catch (e) { auditStatus(`<span class="tag bad">${esc(e.message)}</span>`); }
 });
 form.addEventListener('submit', () => {
   const f = new FormData(form);
@@ -78,11 +130,13 @@ form.addEventListener('submit', () => {
     gradTerm: f.get('gradTerm') || '',
     major: f.get('major').trim(),
     intendedMajor: document.getElementById('transferring').checked ? (f.get('intendedMajor') || '').trim() : '',
-    career: (f.get('career') || '').trim(),
+    careers: [...selectedCareers, ...String(f.get('careerOther') || '').split(/[,;]/).map((x) => x.trim()).filter(Boolean)],
+    audit: pendingAudit?.cleared ? null : (pendingAudit || store.profile?.audit || null),
     completed: completed.get(),
     maxCredits: Number(f.get('maxCredits')) || 16,
     includeSummer: f.get('includeSummer') === 'on',
   };
+  store.profile.career = store.profile.careers.join('; ');
   persist('icc.profile', store.profile);
   profileSummary();
   store.emit('profile', store.profile);
