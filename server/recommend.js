@@ -50,6 +50,7 @@ export async function recommendRequest(profile = {}, { targetCredits, extraCours
   const picked = [];
   const notes = [];
   const fullCourses = [];
+  const missingPrereq = [];
   let credits = 0;
 
   const tryAdd = async (code, why, { checkPrereq = false } = {}) => {
@@ -57,7 +58,10 @@ export async function recommendRequest(profile = {}, { targetCredits, extraCours
     if (!code || avoid.has(code) || picked.some((p) => p.code === code) || credits >= target) return;
     const course = await getCourse(code);
     if (!course) return;
-    if (checkPrereq && checkPrereqs(course.prereqText || course.description, done).status === 'missing') return;
+    if (checkPrereqs(course.prereqText || course.description, done).status === 'missing') {
+      if (!checkPrereq) missingPrereq.push(code);
+      return;
+    }
     if (course.sections.length && course.sections.every((s) => /closed/i.test(s.availability || ''))) {
       fullCourses.push(code);
       return;
@@ -89,6 +93,7 @@ export async function recommendRequest(profile = {}, { targetCredits, extraCours
     genEds.push({ ...g, count: 1 });
     credits += 3;
   }
+  if (missingPrereq.length) notes.push(`Skipped ${missingPrereq.join(', ')}: you don't have the prerequisites yet (based on your completed courses/audit).`);
   if (fullCourses.length) notes.push(`${fullCourses.join(', ')} ${fullCourses.length > 1 ? 'are' : 'is'} full right now, so I left ${fullCourses.length > 1 ? 'them' : 'it'} out. Open the course and click Watch to get a seat alert.`);
   if (credits < 12) notes.push(`Only about ${credits} credits fit from your plan. Add electives to reach full-time (12+).`);
 
@@ -98,19 +103,40 @@ export async function recommendRequest(profile = {}, { targetCredits, extraCours
   };
 }
 
-/** Recommend + generate, retrying once without any course that blocks every schedule. */
+/**
+ * Recommend + generate. Courses are added one at a time in priority order and only kept if a
+ * valid schedule still exists, so the result is never empty just because two courses clash.
+ */
 export async function recommendSchedules(profile, opts = {}) {
   const { request, info } = await recommendRequest(profile, opts);
-  const full = { ...request, constraints: { ...(opts.constraints || {}) }, weights: opts.weights, prefs: opts.prefs || {}, profile, limit: 40 };
-  let result = await generateSchedules(full);
-  if (!result.schedules.length) {
-    const blocking = new Set(result.diagnostics.filter((d) => /No section/.test(d.message)).map((d) => d.slot));
-    if (blocking.size) {
-      full.courses = full.courses.filter((c) => !blocking.has(c));
-      full.genEds = [...full.genEds, ...[...blocking].slice(0, 2).map(() => ({ category: 'HUM', count: 1 }))];
-      info.notes.push(`Dropped ${[...blocking].join(', ')} because no section fits; added gen ed slots instead.`);
-      result = await generateSchedules(full);
-    }
+  const base = { constraints: { ...(opts.constraints || {}) }, weights: opts.weights, prefs: opts.prefs || {}, profile, groups: [] };
+  const fits = async (courses, genEds) => (await generateSchedules({ ...base, courses, genEds, limit: 1 })).total > 0;
+
+  const kept = [];
+  const left = [];
+  for (const code of request.courses) {
+    if (await fits([...kept, code], [])) kept.push(code); else left.push(code);
   }
+  // re-fill credits lost to dropped courses with extra gen eds
+  const lostCredits = info.picks.filter((p) => left.includes(p.code)).reduce((n, p) => n + p.credits, 0);
+  const genEdPool = [...request.genEds];
+  for (const cat of ['HUM', 'SBS', 'NAT', 'CS']) {
+    if (genEdPool.length >= request.genEds.length + Math.ceil(lostCredits / 3)) break;
+    if (!genEdPool.some((g) => g.category === cat)) genEdPool.push({ category: cat, count: 1 });
+  }
+  const keptCredits = info.picks.filter((p) => kept.includes(p.code)).reduce((n, p) => n + p.credits, 0);
+  const genEds = [];
+  for (const g of genEdPool) {
+    if (genEds.length >= 3 || keptCredits + 3 * (genEds.length + 1) > info.target + 1) break;
+    if (await fits(kept, [...genEds, g])) genEds.push(g);
+  }
+  if (left.length) {
+    info.notes.push(`Left out ${left.join(', ')}: ${left.length > 1 ? 'they' : 'it'} can't fit with the other courses${Object.values(base.constraints).some((v) => v && (!Array.isArray(v) || v.length)) ? ' and your time/seat filters' : ''}. Try them in a later term or relax a constraint.`);
+  }
+  info.picks = info.picks.filter((p) => kept.includes(p.code));
+  info.genEds = genEds;
+
+  const full = { ...base, courses: kept, genEds, limit: 40 };
+  const result = await generateSchedules(full);
   return { request: { ...full, profile: undefined }, info, ...result };
 }

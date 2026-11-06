@@ -334,6 +334,19 @@ export async function generateSchedules(request) {
   };
   dfs(0);
 
+  // Nothing fit even though every course has options: find which courses always clash.
+  if (!results.length && !truncated) {
+    for (let a = 0; a < good.length; a++) {
+      for (let b = a + 1; b < good.length; b++) {
+        const always = good[a].options.every((x) => good[b].options.every((y) => x.courseCode === y.courseCode || bundlesConflict(x, y)));
+        if (always) diagnostics.push({ slot: `${good[a].label} + ${good[b].label}`, message: `Every section of ${good[a].label} overlaps every section of ${good[b].label}. Drop one of them.`, dropped: {}, conflict: [good[a].label, good[b].label] });
+      }
+    }
+    if (!diagnostics.some((d) => d.conflict)) {
+      diagnostics.push({ slot: 'Combination', message: `Each course fits on its own, but no combination of all ${good.length} avoids overlaps. Remove one course or relax a time constraint.`, dropped: {} });
+    }
+  }
+
   // Score everything, rank, and compute backups.
   const prefs = request.prefs || {};
   const scored = results.map((p) => {
