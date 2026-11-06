@@ -49,6 +49,50 @@ function bundlesConflict(x, y) {
   return false;
 }
 
+// ---------------- constraint sanitizing ----------------
+
+/** Accepts minutes, hours ("10"), "10:30", "10am", "2:30pm"; returns minutes after midnight or null. */
+export function toMinutes(v) {
+  if (v == null || v === '') return null;
+  if (typeof v === 'number') return v < 24 ? Math.round(v * 60) : Math.round(v);
+  const m = String(v).trim().toLowerCase().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/);
+  if (!m) return Number.isFinite(Number(v)) ? toMinutes(Number(v)) : null;
+  let h = Number(m[1]) % 12;
+  if (m[3] === 'pm' || (!m[3] && Number(m[1]) === 12)) h += 12;
+  else if (!m[3] && Number(m[1]) > 12) h = Number(m[1]);
+  return h * 60 + Number(m[2] || 0);
+}
+
+/**
+ * Drop constraints that can't be what a student meant (e.g. "no class before 6:11pm",
+ * which silently removes every in-person section). Returns notes explaining any change.
+ */
+export function sanitizeConstraints(c = {}) {
+  const out = { ...c };
+  const notes = [];
+  out.earliestStart = toMinutes(c.earliestStart);
+  out.latestEnd = toMinutes(c.latestEnd);
+  if (out.earliestStart != null && (out.earliestStart < 360 || out.earliestStart > 840)) {
+    notes.push(`Ignored "no class before ${fmtTime(out.earliestStart)}" because it would rule out almost every class.`);
+    out.earliestStart = null;
+  }
+  if (out.latestEnd != null && (out.latestEnd < 660 || out.latestEnd > 1440)) {
+    notes.push(`Ignored "no class after ${fmtTime(out.latestEnd)}" because it would rule out almost every class.`);
+    out.latestEnd = null;
+  }
+  if (out.earliestStart != null && out.latestEnd != null && out.latestEnd - out.earliestStart < 180) {
+    notes.push('Ignored the start/end time window because it is shorter than 3 hours.');
+    out.earliestStart = null; out.latestEnd = null;
+  }
+  const days = new Set(['M', 'T', 'W', 'R', 'F']);
+  out.daysOff = [...new Set((c.daysOff || []).map((d) => String(d).toUpperCase()[0] === 'T' && /th|r/i.test(d) ? 'R' : String(d).toUpperCase()[0]))].filter((d) => days.has(d));
+  if (out.daysOff.length >= 5) { notes.push('Ignored "all days off".'); out.daysOff = []; }
+  out.blocked = (c.blocked || [])
+    .map((b) => ({ ...b, start: toMinutes(b.start), end: toMinutes(b.end), days: (b.days || []).filter((d) => days.has(d)) }))
+    .filter((b) => b.start != null && b.end != null && b.end > b.start && b.days.length);
+  return { constraints: out, notes };
+}
+
 // ---------------- constraint filters ----------------
 
 function violatesConstraints(bundle, c) {
@@ -204,7 +248,7 @@ async function groupSlot(group, ctx) {
 export async function generateSchedules(request) {
   const t0 = Date.now();
   const profile = request.profile || {};
-  const constraints = request.constraints || {};
+  const { constraints, notes: constraintNotes } = sanitizeConstraints(request.constraints || {});
   const weights = { ...DEFAULT_WEIGHTS, ...(request.weights || {}) };
   const required = (request.courses || []).map(normalizeCode).filter(Boolean);
   const ctx = { profile, required };
@@ -217,7 +261,7 @@ export async function generateSchedules(request) {
   const slots = await Promise.all(slotPromises);
   const errors = slots.filter((s) => s.error).map((s) => s.error);
   const good = slots.filter((s) => !s.error);
-  if (!good.length) return { schedules: [], total: 0, errors, diagnostics: [] };
+  if (!good.length) return { schedules: [], total: 0, errors, diagnostics: [], warnings: constraintNotes, constraints };
 
   // Build + filter bundles per slot, tracking why options were dropped.
   const diagnostics = [];
@@ -263,7 +307,7 @@ export async function generateSchedules(request) {
     }
   }
   if (good.some((s) => !s.options.length)) {
-    return { schedules: [], total: 0, errors, diagnostics, eligibility };
+    return { schedules: [], total: 0, errors, diagnostics, eligibility, warnings: constraintNotes, constraints };
   }
 
   // DFS over slots, fewest options first.
@@ -352,8 +396,15 @@ export async function generateSchedules(request) {
     };
   });
 
+  const warnings = [...constraintNotes];
+  const best = schedules[0]?.credits ?? 0;
+  if (schedules.length && best < 12) {
+    warnings.push(`These schedules are only ${best} credit hours. Full-time is at least 12 (most students take 15–16). Add more courses or gen eds.`);
+  }
   return {
     schedules,
+    warnings,
+    constraints,
     total: results.length,
     truncated,
     errors,

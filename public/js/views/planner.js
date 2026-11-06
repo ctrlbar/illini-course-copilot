@@ -27,7 +27,8 @@ export function initPlanner(el) {
   renderResults();
   store.on('planner-add-course', (code) => { if (!req.courses.includes(code)) req.courses.push(code); save(); renderBuilder(); toast(`${code} added to planner`, 'ok'); });
   store.on('planner-load', ({ request, result }) => {
-    req = { ...defaultReq(), ...request, constraints: { ...defaultReq().constraints, ...(request.constraints || {}) }, weights: { ...store.meta.weights, ...(request.weights || {}) } };
+    req = { ...defaultReq(), ...request, constraints: { ...defaultReq().constraints, ...(request.constraints || {}), ...(result.constraints || {}) }, weights: { ...store.meta.weights, ...(request.weights || {}) } };
+    delete req.profile;
     save(); renderBuilder();
     store.planner = { request, result, selected: 0, pinned: [] };
     renderResults();
@@ -174,6 +175,11 @@ async function generate() {
     const body = { ...req, profile: profile(), limit: 40 };
     const result = await api('/api/schedules', { method: 'POST', body });
     store.planner = { request: body, result, selected: 0, pinned: [] };
+    if (result.constraints) {
+      // reflect any constraint the server had to ignore (e.g. an impossible start time)
+      req.constraints = { ...req.constraints, earliestStart: result.constraints.earliestStart, latestEnd: result.constraints.latestEnd };
+      save(); renderBuilder();
+    }
     renderResults();
   } catch (e) {
     root.querySelector('#results').innerHTML = `<div class="banner bad">${esc(e.message)}</div>`;
@@ -242,7 +248,8 @@ function renderResults() {
   }
   const diag = (result.diagnostics || []).map((d) => `
     <div class="banner ${result.schedules.length ? 'info' : 'bad'} small"><b>${esc(d.slot)}:</b> ${esc(d.message)}${Object.keys(d.dropped || {}).length ? ` (removed: ${Object.entries(d.dropped).map(([k, v]) => `${v} × ${esc(k)}`).join(', ')})` : ''}</div>`).join('');
-  const errs = (result.errors || []).map((e) => `<div class="banner bad small">${esc(e)}</div>`).join('');
+  const errs = (result.errors || []).map((e) => `<div class="banner bad small">${esc(e)}</div>`).join('')
+    + (result.warnings || []).map((w) => `<div class="banner warn small">⚠ ${esc(w)}</div>`).join('');
   const missing = Object.entries(result.eligibility || {}).filter(([, v]) => v.status === 'missing')
     .map(([k, v]) => `<div class="banner warn small"><b>${esc(k)}:</b> ${esc(v.reasons.join('; '))} — based on your profile's completed courses.</div>`).join('');
 

@@ -42,7 +42,9 @@ function render(pending = false) {
   }
   box.innerHTML = messages.map((m, i) => `
     <div class="msg ${m.role}">${m.role === 'user' ? esc(m.content) : md(m.content)}
-      ${(actionsByIndex[i] || []).map((a, j) => a.type === 'schedules'
+      ${(actionsByIndex[i] || []).map((a, j, all) => a.type === 'schedules' && (!a.result.schedules.length || all.slice(j + 1).some((x) => x.type === 'schedules' && x.result.schedules.length))
+        ? ''
+        : a.type === 'schedules'
         ? `<div style="margin-top:8px"><button class="btn sm primary" data-open-sched="${i}:${j}">Open ${a.result.schedules.length} ranked schedules in planner →</button></div>`
         : a.type === 'course' ? `<div style="margin-top:8px"><button class="btn sm" data-open-course="${esc(a.code)}">View ${esc(a.code)}</button></div>` : '').join('')}
     </div>`).join('') + (pending ? '<div class="msg assistant"><span class="spinner"></span> Looking that up…</div>' : '');

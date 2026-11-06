@@ -59,7 +59,7 @@ function careerKeywords(career = '') {
   return [...out];
 }
 
-export async function buildRoadmap(profile = {}) {
+export async function buildRoadmap(profile = {}, { ai = true } = {}) {
   const warnings = [];
   const audit = profile.audit || null;
   // Courses in progress this term count as done by the time the next term starts.
@@ -272,7 +272,7 @@ export async function buildRoadmap(profile = {}) {
     };
   }
 
-  if (grokEnabled()) {
+  if (ai && grokEnabled()) {
     try { await enhanceWithGrok(result, profile, program); }
     catch (e) { result.warnings.push(`Grok advice unavailable: ${e.message}`); }
   } else {

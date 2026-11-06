@@ -9,6 +9,7 @@ import { generateSchedules } from './scheduler.js';
 import { courseEligibility } from './eligibility.js';
 import { describeLinking } from './sections.js';
 import { courseGpa } from './datasets.js';
+import { buildRoadmap } from './roadmap.js';
 
 export const grokEnabled = () => Boolean(config.grok.apiKey);
 
@@ -117,6 +118,14 @@ const TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'get_degree_plan',
+      description: "Get the student's degree plan from their major's official requirements and their imported degree audit (DARS): what they still need, and the recommended courses for the NEXT term (the one being registered for). ALWAYS call this before recommending courses or a schedule.",
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'search_courses',
       description: 'Search courses offered this term by keyword, subject, gen-ed category, level or minimum average GPA.',
       parameters: {
@@ -180,7 +189,26 @@ function summarizeCourse(course, profile) {
   };
 }
 
+async function degreePlanForAgent(profile) {
+  const r = await buildRoadmap(profile, { ai: false });
+  if (r.error) return { error: r.error };
+  const next = r.terms[0];
+  return {
+    program: r.program.title,
+    nextTerm: next?.name,
+    recommendedNextTerm: (next?.courses || []).map((c) => ({
+      code: c.code, title: c.code ? (c.suggestion || c.title) : c.title, credits: c.hours, kind: c.kind, alternatives: c.options,
+    })),
+    nextTermCredits: next?.credits,
+    stillRequired: r.requirements.remaining.slice(0, 25).map((x) => `${x.code} ${x.title}${x.offeredNow ? '' : ' (not offered next term)'}`),
+    auditUnmet: r.audit?.requirements.filter((q) => q.status === 'incomplete').map((q) => ({ requirement: q.title, needs: q.needs, options: q.options?.slice(0, 15) })) || null,
+    warnings: r.warnings,
+    howToUse: 'Use recommendedNextTerm courses that have a code as generate_schedules.courses. For slots without a code: Gen Ed slots -> genEds (pick categories the audit says are unmet), electives -> pick a code from auditUnmet options or search_courses. Aim for 15-16 credits.',
+  };
+}
+
 async function runTool(name, args, profile, actions) {
+  if (name === 'get_degree_plan') return degreePlanForAgent(profile);
   if (name === 'search_courses') return searchCourses({ ...args, limit: args.limit || 12 });
   if (name === 'get_course') return summarizeCourse(await getCourse(args.code), profile);
   if (name === 'generate_schedules') {
@@ -188,7 +216,10 @@ async function runTool(name, args, profile, actions) {
     const result = await generateSchedules(request);
     actions.push({ type: 'schedules', request, result });
     return {
-      total: result.total, errors: result.errors, diagnostics: result.diagnostics,
+      total: result.total, errors: result.errors, diagnostics: result.diagnostics, warnings: result.warnings,
+      credits: result.schedules[0]?.credits,
+      hint: result.schedules.length ? undefined
+        : `No schedule fits. Blocking slots: ${result.diagnostics.filter((d) => /No section/.test(d.message)).map((d) => d.slot).join(', ') || 'see diagnostics'}${result.errors.length ? '; ' + result.errors.join('; ') : ''}. Retry without or swapping them.`,
       top: result.schedules.slice(0, 3).map((s) => ({
         rank: s.rank, score: s.score, highlights: s.highlights, warnings: s.warnings,
         daysWithClass: [...new Set(s.bundles.flatMap((b) => b.sections.flatMap((x) => x.meetings.flatMap((m) => m.days))))].join(''),
@@ -202,14 +233,24 @@ async function runTool(name, args, profile, actions) {
   return { error: `unknown tool ${name}` };
 }
 
+function auditSummary(profile) {
+  const a = profile.audit;
+  if (!a) return 'No degree audit imported.';
+  return `Degree audit imported: ${a.completed?.length || 0} completed, in progress: ${(a.inProgress || []).join(', ') || 'none'}. Unmet: ${(a.requirements || []).filter((r) => r.status === 'incomplete').map((r) => `${r.title}${r.needs ? ` (${r.needs})` : ''}`).join('; ') || 'none'}.`;
+}
+
 function systemPrompt(profile) {
   return `You are Illini Course Copilot, a friendly, concise course-planning assistant for University of Illinois Urbana-Champaign students.
 Term being registered for: ${termLabel()}.
-Student profile: ${JSON.stringify({ standing: profile.standing, major: profile.major, intendedMajor: profile.intendedMajor, career: profile.career, gradTerm: profile.gradTerm, completed: profile.completed })}.
+Student profile: ${JSON.stringify({ standing: profile.standing, major: profile.major, intendedMajor: profile.intendedMajor, careers: profile.careers || profile.career, gradTerm: profile.gradTerm, completed: profile.completed })}.
+${auditSummary(profile)}
 Rules:
+- When the student asks what to take or for a recommended schedule, FIRST call get_degree_plan, then call generate_schedules with its next-term courses plus gen-ed/elective slots so the schedule totals 15-16 credits (never fewer than 12 unless the student asks).
+- Only pass time constraints (earliestStart/latestEnd in minutes after midnight, e.g. 10am = 600), daysOff or onlyOpen if the student explicitly asked for them.
+- If generate_schedules returns 0 schedules, read diagnostics/errors, drop or swap the course that blocks it (e.g. one with no fitting sections), and call generate_schedules again. Never end with 0 schedules without retrying at least once. Suggest watching closed sections for seat alerts.
 - ALWAYS use tools for facts about courses, sections, seats, prerequisites and schedules. Never invent CRNs, times or seat counts.
 - When the student wants a schedule, call generate_schedules; the app will render the ranked calendars, so just summarize the best option and why.
-- Copy meeting days/times, CRNs and seat status EXACTLY from tool results. Never compute or guess them. Day letters: M T W R(Thursday) F.
+- Copy meeting days/times, CRNs, seat status and total credits EXACTLY from tool results (generate_schedules returns "credits"). Never compute or guess them. Day letters: M T W R(Thursday) F.
 - Point out restrictions, missing prerequisites and closed sections. Suggest watching closed sections for seat alerts.
 - Remind students to confirm degree requirements with their advisor / DARS when giving degree advice.
 - Keep answers short, use bullet points, and use course codes like "CS 225".`;
@@ -227,7 +268,11 @@ export async function agentReply(messages, profile = {}) {
     if (!msg.tool_calls?.length) return { reply: msg.content, actions, mode: 'grok' };
     for (const call of msg.tool_calls) {
       let result;
-      try { result = await runTool(call.function.name, JSON.parse(call.function.arguments || '{}'), profile, actions); }
+      try {
+        const args = JSON.parse(call.function.arguments || '{}');
+        console.log(`[grok] tool ${call.function.name}`, JSON.stringify(args).slice(0, 400));
+        result = await runTool(call.function.name, args, profile, actions);
+      }
       catch (e) { result = { error: e.message }; }
       convo.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result).slice(0, 12000) });
     }
