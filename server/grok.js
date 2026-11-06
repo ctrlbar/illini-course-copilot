@@ -10,6 +10,7 @@ import { courseEligibility } from './eligibility.js';
 import { describeLinking } from './sections.js';
 import { courseGpa } from './datasets.js';
 import { buildRoadmap } from './roadmap.js';
+import { recommendSchedules } from './recommend.js';
 
 export const grokEnabled = () => Boolean(config.grok.apiKey);
 
@@ -126,6 +127,26 @@ const TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'recommend_schedule',
+      description: "Build and rank a full-time (12-17 credit) schedule for next term from the student's degree plan and audit. Use this whenever the student asks for a recommended/ideal schedule or what to take. Optional constraints only if the student stated them.",
+      parameters: {
+        type: 'object',
+        properties: {
+          extraCourses: { type: 'array', items: { type: 'string' }, description: 'courses the student explicitly wants included' },
+          avoidCourses: { type: 'array', items: { type: 'string' }, description: 'courses the student does not want' },
+          targetCredits: { type: 'integer' },
+          constraints: {
+            type: 'object',
+            properties: { earliestStart: { type: 'integer', description: 'minutes after midnight' }, latestEnd: { type: 'integer' }, daysOff: { type: 'array', items: { type: 'string' } } },
+          },
+          weights: { type: 'object', additionalProperties: { type: 'number' } },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'search_courses',
       description: 'Search courses offered this term by keyword, subject, gen-ed category, level or minimum average GPA.',
       parameters: {
@@ -207,28 +228,38 @@ async function degreePlanForAgent(profile) {
   };
 }
 
+function summarizeSchedules(result, extra = {}) {
+  return {
+    ...extra,
+    total: result.total, errors: result.errors, diagnostics: result.diagnostics, warnings: result.warnings,
+    credits: result.schedules[0]?.credits,
+    hint: result.schedules.length ? undefined
+      : `No schedule fits. Blocking slots: ${result.diagnostics.filter((d) => /No section/.test(d.message)).map((d) => d.slot).join(', ') || 'see diagnostics'}${result.errors.length ? '; ' + result.errors.join('; ') : ''}. Retry without or swapping them.`,
+    top: result.schedules.slice(0, 3).map((s) => ({
+      rank: s.rank, score: s.score, credits: s.credits, highlights: s.highlights, warnings: s.warnings,
+      daysWithClass: [...new Set(s.bundles.flatMap((b) => b.sections.flatMap((x) => x.meetings.flatMap((m) => m.days))))].join(''),
+      sections: s.bundles.flatMap((b) => b.sections.map((x) => ({
+        course: b.courseCode, slot: b.slot, section: x.number, type: x.type, crn: x.crn, seats: x.availability,
+        meets: x.meetings.map((m) => (m.start == null ? 'online/arranged' : `${m.days.join('')} ${m.startLabel}-${m.endLabel} @ ${m.building}`)).join('; '),
+      }))),
+    })),
+  };
+}
+
 async function runTool(name, args, profile, actions) {
   if (name === 'get_degree_plan') return degreePlanForAgent(profile);
+  if (name === 'recommend_schedule') {
+    const result = await recommendSchedules(profile, args);
+    actions.push({ type: 'schedules', request: result.request, result });
+    return summarizeSchedules(result, { picks: result.info.picks, notes: result.info.notes });
+  }
   if (name === 'search_courses') return searchCourses({ ...args, limit: args.limit || 12 });
   if (name === 'get_course') return summarizeCourse(await getCourse(args.code), profile);
   if (name === 'generate_schedules') {
     const request = { ...args, profile, limit: 30 };
     const result = await generateSchedules(request);
     actions.push({ type: 'schedules', request, result });
-    return {
-      total: result.total, errors: result.errors, diagnostics: result.diagnostics, warnings: result.warnings,
-      credits: result.schedules[0]?.credits,
-      hint: result.schedules.length ? undefined
-        : `No schedule fits. Blocking slots: ${result.diagnostics.filter((d) => /No section/.test(d.message)).map((d) => d.slot).join(', ') || 'see diagnostics'}${result.errors.length ? '; ' + result.errors.join('; ') : ''}. Retry without or swapping them.`,
-      top: result.schedules.slice(0, 3).map((s) => ({
-        rank: s.rank, score: s.score, highlights: s.highlights, warnings: s.warnings,
-        daysWithClass: [...new Set(s.bundles.flatMap((b) => b.sections.flatMap((x) => x.meetings.flatMap((m) => m.days))))].join(''),
-        sections: s.bundles.flatMap((b) => b.sections.map((x) => ({
-          course: b.courseCode, section: x.number, type: x.type, crn: x.crn, seats: x.availability,
-          meets: x.meetings.map((m) => (m.start == null ? 'online/arranged' : `${m.days.join('')} ${m.startLabel}-${m.endLabel} @ ${m.building}`)).join('; '),
-        }))),
-      })),
-    };
+    return summarizeSchedules(result);
   }
   return { error: `unknown tool ${name}` };
 }
@@ -245,7 +276,9 @@ Term being registered for: ${termLabel()}.
 Student profile: ${JSON.stringify({ standing: profile.standing, major: profile.major, intendedMajor: profile.intendedMajor, careers: profile.careers || profile.career, gradTerm: profile.gradTerm, completed: profile.completed })}.
 ${auditSummary(profile)}
 Rules:
-- When the student asks what to take or for a recommended schedule, FIRST call get_degree_plan, then call generate_schedules with its next-term courses plus gen-ed/elective slots so the schedule totals 15-16 credits (never fewer than 12 unless the student asks).
+- When the student asks for a recommended/ideal schedule or what to take next term, call recommend_schedule (it already uses their degree plan + audit and targets full-time). Use generate_schedules only when the student names the exact courses they want.
+- Use get_degree_plan to answer questions about requirements or their path to graduation.
+- When presenting a schedule, explain WHY it's good for this student: which degree requirements each course satisfies, the GPA/seat/time trade-offs, and the total credits.
 - Only pass time constraints (earliestStart/latestEnd in minutes after midnight, e.g. 10am = 600), daysOff or onlyOpen if the student explicitly asked for them.
 - If generate_schedules returns 0 schedules, read diagnostics/errors, drop or swap the course that blocks it (e.g. one with no fitting sections), and call generate_schedules again. Never end with 0 schedules without retrying at least once. Suggest watching closed sections for seat alerts.
 - ALWAYS use tools for facts about courses, sections, seats, prerequisites and schedules. Never invent CRNs, times or seat counts.

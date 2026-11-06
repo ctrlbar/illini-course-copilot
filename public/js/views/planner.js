@@ -44,6 +44,8 @@ function renderBuilder() {
   const cats = store.meta.genEdCategories;
   const b = root.querySelector('#builder');
   b.innerHTML = `
+    <button class="btn primary" id="recommend" style="width:100%;justify-content:center;margin-bottom:6px">🎯 Recommend my ${esc(store.meta.termLabel)} schedule</button>
+    <div class="muted small" style="margin-bottom:12px">Builds a full-time schedule from your degree roadmap${store.profile?.audit ? ' and degree audit' : ''}, then ranks every valid combination.</div>
     <h3>Describe your ideal schedule</h3>
     <div class="nl-box">
       <textarea id="nl" placeholder="e.g. I need CS 225, MATH 241 and a humanities gen ed. Nothing before 10am, Fridays free."></textarea>
@@ -114,7 +116,11 @@ function renderBuilder() {
     $('#nl-go').disabled = true;
     $('#nl-go').innerHTML = '<span class="spinner"></span> Reading…';
     try {
-      const parsed = await api('/api/schedules/parse', { method: 'POST', body: { text } });
+      const parsed = await api('/api/schedules/parse', { method: 'POST', body: { text, profile: profile() } });
+      if (parsed.recommended) {
+        req.courses = [];
+        store.planner.info = parsed.info;
+      }
       req.courses = [...new Set([...req.courses, ...(parsed.courses || [])])];
       if (parsed.genEds?.length) req.genEds = parsed.genEds.map((g) => ({ category: g.category, sub: g.sub || '', count: g.count || 1 }));
       if (parsed.groups?.length) req.groups = parsed.groups;
@@ -163,7 +169,26 @@ function renderBuilder() {
   $$('[data-w]').forEach((x) => x.addEventListener('input', () => { req.weights[x.dataset.w] = Number(x.value); root.querySelector(`#wv-${x.dataset.w}`).textContent = x.value; save(); }));
   $('#p-morning').addEventListener('change', (e) => { req.prefs.preferMornings = e.target.checked; save(); });
   $('#generate').addEventListener('click', generate);
-  $('#reset').addEventListener('click', () => { req = defaultReq(); save(); renderBuilder(); });
+  $('#recommend').addEventListener('click', recommend);
+  $('#reset').addEventListener('click', () => { req = defaultReq(); store.planner.info = null; save(); renderBuilder(); });
+}
+
+async function recommend() {
+  if (!store.profile?.major) { toast('Set up your profile (major + completed courses) first', 'bad'); document.getElementById('profile-btn').click(); return; }
+  const btn = root.querySelector('#recommend');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Reading your degree plan…';
+  root.querySelector('#results').innerHTML = `<div class="panel empty"><span class="spinner"></span><p>Picking the courses you still need for ${esc(store.meta.termLabel)}, then checking every section combination…</p></div>`;
+  try {
+    const r = await api('/api/schedules/recommend', { method: 'POST', body: { profile: profile(), constraints: req.constraints, weights: req.weights, prefs: req.prefs } });
+    req.courses = r.request.courses;
+    req.genEds = r.request.genEds.map((g) => ({ category: g.category, sub: g.sub || '', count: 1 }));
+    save(); renderBuilder();
+    store.planner = { request: r.request, result: r, selected: 0, pinned: [], info: r.info };
+    renderResults();
+  } catch (e) {
+    root.querySelector('#results').innerHTML = `<div class="banner bad">${esc(e.message)}</div>`;
+    renderBuilder();
+  }
 }
 
 async function generate() {
@@ -174,7 +199,7 @@ async function generate() {
   try {
     const body = { ...req, profile: profile(), limit: 40 };
     const result = await api('/api/schedules', { method: 'POST', body });
-    store.planner = { request: body, result, selected: 0, pinned: [] };
+    store.planner = { request: body, result, selected: 0, pinned: [], info: store.planner.info };
     if (result.constraints) {
       // reflect any constraint the server had to ignore (e.g. an impossible start time)
       req.constraints = { ...req.constraints, earliestStart: result.constraints.earliestStart, latestEnd: result.constraints.latestEnd };
@@ -258,7 +283,17 @@ function renderResults() {
     return;
   }
   const s = result.schedules[selected] || result.schedules[0];
-  box.innerHTML = `
+  const info = store.planner.info || result.info;
+  const infoHtml = info ? `
+    <div class="panel" style="margin-bottom:12px">
+      <h3>Why these courses <span class="tag orange">from your ${info.auditUsed ? 'degree audit + ' : ''}roadmap</span></h3>
+      <ul class="small" style="margin:0;padding-left:18px">
+        ${info.picks.map((p) => `<li><a href="#" data-course="${esc(p.code)}"><b>${esc(p.code)}</b></a> (${p.credits} cr): ${esc(p.why)}</li>`).join('')}
+        ${info.genEds.map((g) => `<li><b>${esc(store.meta.genEdCategories[g.category]?.subs?.[g.sub] || store.meta.genEdCategories[g.category]?.name || g.category)} gen ed</b> (3 cr): picked to fit your week, favoring high GPA</li>`).join('')}
+      </ul>
+      ${info.notes.map((n) => `<div class="banner warn small">${esc(n)}</div>`).join('')}
+    </div>` : '';
+  box.innerHTML = `${infoHtml}
     <div class="results-head">
       <h2 style="margin:0">${result.total.toLocaleString()}${result.truncated ? '+' : ''} valid schedules</h2>
       <span class="muted small">ranked by your preferences · ${result.ms} ms</span>
@@ -283,6 +318,7 @@ function renderResults() {
       <div class="detail">${renderDetail(s, selected)}</div>
     </div>`;
 
+  box.querySelectorAll('.panel [data-course]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); openCourse(a.dataset.course); }));
   box.querySelectorAll('[data-sel]').forEach((c) => c.addEventListener('click', () => { store.planner.selected = +c.dataset.sel; renderResults(); }));
   box.querySelector('#compare-clear')?.addEventListener('click', () => { store.planner.pinned = []; renderResults(); });
   wireDetail(box, s, selected);

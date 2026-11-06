@@ -13,6 +13,7 @@ import { grokEnabled, agentReply, parseScheduleRequest } from './grok.js';
 import * as alerts from './alerts.js';
 import { scheduleToIcs, reminderToIcs } from './ics.js';
 import { parseAudit, pdfToText } from './audit.js';
+import { recommendRequest, recommendSchedules, wantsRecommendation } from './recommend.js';
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -60,7 +61,26 @@ app.post('/api/course', route(async (req) => {
   };
 }));
 
-app.post('/api/schedules/parse', route((req) => parseScheduleRequest(String(req.body.text || ''))));
+// Text -> schedule request. "Recommend me a schedule" (or text without courses) is filled from the
+// student's roadmap + audit; constraints from the text still apply.
+app.post('/api/schedules/parse', route(async (req) => {
+  const text = String(req.body.text || '');
+  const profile = req.body.profile || {};
+  const parsed = await parseScheduleRequest(text);
+  console.log(`[parse] "${text.slice(0, 80)}" -> courses=${parsed.courses?.join(',') || '-'} via ${parsed.parser}`);
+  if (profile.major && (wantsRecommendation(text) || !parsed.courses?.length)) {
+    const { request, info } = await recommendRequest(profile, { extraCourses: parsed.courses || [] });
+    console.log(`[recommend] ${request.courses.join(', ')} + ${request.genEds.length} gen ed(s) ~${info.estCredits} cr`);
+    return { ...parsed, courses: request.courses, genEds: parsed.genEds?.length ? parsed.genEds : request.genEds, recommended: true, info };
+  }
+  return parsed;
+}));
+
+app.post('/api/schedules/recommend', route(async (req) => {
+  const r = await recommendSchedules(req.body.profile || {}, { constraints: req.body.constraints, weights: req.body.weights, prefs: req.body.prefs });
+  console.log(`[recommend] ${r.request.courses.join(', ')} + ${r.request.genEds.length} gen ed(s) -> ${r.total} schedules, best ${r.schedules[0]?.credits ?? 0} cr`);
+  return r;
+}));
 
 app.post('/api/schedules', route(async (req) => {
   let request = req.body;

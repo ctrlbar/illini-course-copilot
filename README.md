@@ -9,6 +9,7 @@ A Grok-powered course-planning assistant for UIUC students. It turns the tedious
 
 | | |
 |---|---|
+| **🎯 Recommend my schedule** | One click (or "recommend me a schedule" in the planner or chat) builds a full-time schedule from your roadmap + degree audit: courses required next term, required courses you can pull forward, then gen eds you still need. Full sections are skipped and flagged for seat alerts. Every pick comes with the reason. |
 | **Smart schedule generator** | Checks *every* valid combination of lectures, discussions and labs, filters by your constraints (start/end times, days off, blocked times, open seats only) and **ranks** them by what you care about: seat availability, start times, days off, compactness, average GPA, walking time between buildings, lunch breaks. |
 | **Calendar view + compare** | Each schedule on a Mon–Fri calendar. Pin two to compare side by side, with a score breakdown explaining the ranking. |
 | **Linked sections done right** | Understands UIUC section linking (e.g. `AL1` + `ADx`, CHEM 102 online lecture + online quiz, PHYS 211 lecture + discussion + lab) and same-time alternatives. |
@@ -47,6 +48,7 @@ server/
   eligibility.js        prerequisite and restriction parsing
   catalog.js            degree requirements + recommended sequence from catalog.illinois.edu
   roadmap.js            semester planner (prereq-aware, audit-aware) + Grok elective picks
+  recommend.js          full-time schedule recommendation from roadmap + audit (shared by planner and chat)
   audit.js              DARS degree-audit parsing (PDF/text, rules + Grok) with PII redaction
   grok.js               xAI Grok client, tool-calling agent, NL schedule parser (+ rule-based fallback)
   alerts.js             seat-alert poller, SSE/Discord/email notifications, reminders

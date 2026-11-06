@@ -373,7 +373,7 @@ export async function generateSchedules(request) {
       rank: rank + 1,
       score: s.score,
       components: Object.fromEntries(Object.entries(s.components).map(([k, v]) => [k, { ...v, label: COMPONENT_LABELS[k], weight: weights[k] }])),
-      credits: s.bundles.reduce((sum, b) => sum + (b.credits?.min || 0), 0),
+      credits: s.bundles.reduce((sum, b) => sum + (b.credits?.min || b.credits?.max || 0), 0),
       highlights, warnings, backups,
       crns: s.bundles.flatMap((b) => b.crns),
       bundles: s.bundles.map((b, si) => ({

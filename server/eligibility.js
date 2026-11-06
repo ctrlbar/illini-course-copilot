@@ -30,8 +30,10 @@ export function parsePrereqs(text = '') {
       if (part.trim()) clauses.push({ type: 'text', text: part.trim() });
       continue;
     }
+    const soft = /equivalent|consent|experience|approval|permission/i.test(part);
     const isOneOf = /\bor\b|one of|either/i.test(part);
-    if (isOneOf) clauses.push({ type: 'oneOf', courses: codes, text: part.trim() });
+    if (soft) clauses.push({ type: 'oneOf', courses: codes, text: part.trim(), soft: true });
+    else if (isOneOf) clauses.push({ type: 'oneOf', courses: codes, text: part.trim() });
     else codes.forEach((c) => clauses.push({ type: 'allOf', courses: [c], text: c }));
   }
   return {
@@ -52,7 +54,10 @@ export function checkPrereqs(text, completed = []) {
   let unknown = false;
   for (const c of p.clauses) {
     if (c.type === 'text') { unknown = true; continue; }
-    if (!c.courses.some((x) => done.has(x))) missing.push(c);
+    if (!c.courses.some((x) => done.has(x))) {
+      if (c.soft) unknown = true; // "CS 101 or equivalent experience" — can't verify, don't block
+      else missing.push(c);
+    }
   }
   if (missing.length) {
     return {
