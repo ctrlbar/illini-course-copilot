@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Illini Course Copilot</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">IC</span>
+      <div>
+        <div class="brand-name">Illini Course Copilot</div>
+        <div class="brand-sub"><span id="term-label">…</span> · <span id="grok-status" class="pill">…</span></div>
+      </div>
+    </div>
+    <nav class="tabs" id="tabs">
+      <button data-tab="planner" class="active">Schedule Planner</button>
+      <button data-tab="roadmap">Degree Roadmap</button>
+      <button data-tab="explore">Explore Courses</button>
+      <button data-tab="alerts">Seat Alerts <span id="alert-count" class="count hidden"></span></button>
+      <button data-tab="chat">Ask Grok</button>
+    </nav>
+    <button class="profile-btn" id="profile-btn" title="Edit your profile">
+      <span id="profile-summary">Set up profile</span>
+    </button>
+  </header>
+
+  <main>
+    <section id="view-planner" class="view active"></section>
+    <section id="view-roadmap" class="view"></section>
+    <section id="view-explore" class="view"></section>
+    <section id="view-alerts" class="view"></section>
+    <section id="view-chat" class="view"></section>
+  </main>
+
+  <!-- Profile / onboarding -->
+  <dialog id="profile-dialog" class="dialog">
+    <form method="dialog" id="profile-form" class="profile-form">
+      <h2>Your profile</h2>
+      <p class="muted">Used to check restrictions and prerequisites and to build your roadmap. Stored only in this browser.</p>
+      <div class="grid2">
+        <label>Year standing
+          <select name="standing" required>
+            <option value="freshman">Freshman</option>
+            <option value="sophomore" selected>Sophomore</option>
+            <option value="junior">Junior</option>
+            <option value="senior">Senior</option>
+          </select>
+        </label>
+        <label>Expected graduation
+          <select name="gradTerm" id="grad-term"></select>
+        </label>
+      </div>
+      <label>Major
+        <input name="major" list="programs" placeholder="e.g. Computer Science, BS" required autocomplete="off" />
+      </label>
+      <label class="check"><input type="checkbox" name="transferring" id="transferring" /> I'm planning to transfer into a different major</label>
+      <label id="intended-wrap" class="hidden">Intended major
+        <input name="intendedMajor" list="programs" placeholder="e.g. Statistics & Computer Science, BSLAS" autocomplete="off" />
+      </label>
+      <datalist id="programs"></datalist>
+      <label>Career goal
+        <input name="career" placeholder="e.g. machine learning engineer, quant, product manager, med school" />
+      </label>
+      <div class="chips" id="career-chips"></div>
+      <label>Courses completed or in progress <span class="muted">(include AP credit)</span>
+        <div class="chip-input" id="completed-input"></div>
+      </label>
+      <div class="grid2">
+        <label>Max credits per semester
+          <input type="number" name="maxCredits" min="12" max="20" value="16" />
+        </label>
+        <label class="check pad-top"><input type="checkbox" name="includeSummer" /> Willing to take summer classes</label>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" class="btn ghost" id="profile-cancel">Cancel</button>
+        <button type="submit" class="btn primary">Save profile</button>
+      </div>
+    </form>
+  </dialog>
+
+  <aside id="drawer" class="drawer" aria-hidden="true">
+    <button class="drawer-close" id="drawer-close" aria-label="Close">×</button>
+    <div id="drawer-body"></div>
+  </aside>
+  <div id="toasts" class="toasts"></div>
+
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>
